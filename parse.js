@@ -1888,7 +1888,9 @@ function parseBlocks(src) {
     noteBlockAdded();
     let i = lineIdx + 2; // skip header + delimiter
     while (i < N) {
-      if (isBlankLine(lines[i])) break;
+      // a line of only spaces (or empty) ends the table, but a line
+      // containing a tab is an (empty) table row, not a blank line
+      if (/^[ ]*$/.test(lines[i])) break;
       const rcur = peekLineContent(i);
       if (!rcur) break;
       if (startsBlock(rcur)) break;
