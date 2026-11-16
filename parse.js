@@ -191,6 +191,46 @@ function matchHtmlTag(src, i) {
 // Does the text starting at `i` look like `[...](...)` (link shape, valid or
 // not)? If yes, return the end index (exclusive) of the whole shape.
 // Label may contain code spans but not bare [ or ].
+// Mask-shape match (marked's blockSkip regex): the label closes at the
+// FIRST ] (no bracket balance), then (...). This is intentionally
+// different from matchLinkShape: a nested link inside an outer label
+// masks only up to its own ] so a delimiter after it stays visible to
+// the emStrong scan (e.g. [foo *[bar [baz](/uri)](/uri)*](/uri)).
+function matchLinkShapeMask(src, i) {
+  const n = src.length;
+  let j = i + 1;
+  while (j < n) {
+    const ch = src[j];
+    if (ch === '\\') { j += 2; continue; }
+    if (ch === '`') {
+      const cs = matchCodeSpan(src, j);
+      if (cs) { j = cs.end; continue; }
+      j++;
+      continue;
+    }
+    if (ch === ']') break;
+    j++;
+  }
+  if (j >= n || src[j] !== ']') return -1;
+  j++;
+  if (j >= n || src[j] !== '(') return -1;
+  j++;
+  let paren = 0;
+  while (j < n) {
+    const ch = src[j];
+    if (ch === '\\') { j += 2; continue; }
+    if (ch === '(') { paren++; j++; continue; }
+    if (ch === ')') {
+      if (paren === 0) return j + 1;
+      paren--;
+      j++;
+      continue;
+    }
+    j++;
+  }
+  return -1;
+}
+
 function matchLinkShape(src, i) {
   const n = src.length;
   // label
@@ -409,7 +449,7 @@ function maskBlockSkip(src) {
   while (i < n) {
     const ch = src[i];
     if (ch === '[') {
-      const end = matchLinkShape(src, i);
+      const end = matchLinkShapeMask(src, i);
       if (end > 0) {
         out += src.slice(last, i) + '[' + 'a'.repeat(Math.max(0, end - i - 2)) + ']';
         last = end;
@@ -2370,6 +2410,9 @@ function tryLink(src, pos, refs, state, textMode) {
   const title = par.title;
   const end = par.end;
   if (textMode) {
+    // a label containing a link rejects the outer link (linkInText),
+    // same as in html mode
+    if (linkInText(labelText, refs)) return null;
     return { end, text: altText(labelText, refs) };
   }
   const html = buildLink(isImage, labelText, href, title, refs, state);
