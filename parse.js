@@ -1762,13 +1762,24 @@ function dedentStr(s, cols, startCol) {
     }
     break;
   }
-  // a tab after a container prefix expands to spaces to the next tab
-  // stop (using its absolute column): e.g. after '> ' the tab at col 3
-  // becomes 1 space, at col 4 becomes 4 spaces. With no container
-  // prefix (startCol 0) a tab is intact and stays a tab.
-  if (startCol > 0 && i < s.length && s[i] === '\t') {
-    const w = 4 - (col % 4);
-    return ' '.repeat(w) + s.slice(i + 1);
+  // Expand any tab in the remaining leading whitespace to spaces using
+  // its absolute column (a tab after a container prefix is expanded;
+  // with no container prefix a leading tab is intact and stays a tab).
+  // A tab that was only partially consumed by the dedent leaves
+  // `partial` spaces first.
+  if (startCol > 0 && i < s.length) {
+    let out = partial > 0 ? ' '.repeat(partial) : '';
+    let j = i;
+    while (j < s.length && (s[j] === ' ' || s[j] === '\t')) {
+      if (s[j] === ' ') { out += ' '; col++; j++; }
+      else {
+        const w = 4 - (col % 4);
+        out += ' '.repeat(w);
+        col += w;
+        j++;
+      }
+    }
+    return out + s.slice(j);
   }
   return (partial > 0 ? ' '.repeat(partial) : '') + s.slice(i);
 }
