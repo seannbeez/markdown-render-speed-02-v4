@@ -1559,6 +1559,11 @@ function startsBlock(cur) {
   if (detectHr(cur)) return true;
   if (detectHtmlBlock(cur)) return true;
   if (peekListMarker(cur)) return true;
+  // a blockquote line ends a table / interrupts a paragraph
+  const s = curRest(cur);
+  let k = 0;
+  while (k < s.length && s[k] === ' ' && k < 3) k++;
+  if (k < s.length && s[k] === '>') return true;
   return false;
 }
 
@@ -2220,12 +2225,13 @@ function startsBlockInterruptingPara(cur) {
 // Rendering
 // ---------------------------------------------------------------------------
 
-function renderNode(node, refs) {
+function renderNode(node, refs, isLast) {
   switch (node.t) {
     case 'doc':
-      return node.children.map(c => renderNode(c, refs)).join('');
+      // at the doc level the last child still needs its trailing newline
+      return node.children.map(c => renderNode(c, refs, false)).join('');
     case 'bq':
-      return '<blockquote>\n' + node.children.map(c => renderNode(c, refs)).join('') + '</blockquote>\n';
+      return '<blockquote>\n' + node.children.map((c, idx) => renderNode(c, refs, idx === node.children.length - 1)).join('') + '</blockquote>\n';
     case 'list': {
       const tag = node.ordered ? 'ol' : 'ul';
       const start = node.ordered && node.start !== 1 ? ' start="' + node.start + '"' : '';
@@ -2249,7 +2255,10 @@ function renderNode(node, refs) {
     }
     case 'html': {
       let text = node.lines.join('\n');
-      if (!node.followedByBlank) text += '\n';
+      // no trailing newline when the block is the last child of its
+      // parent (the container's closing tag follows directly) or when
+      // it is followed by blank line(s)
+      if (!node.followedByBlank && !isLast) text += '\n';
       return text;
     }
     case 'table': {
@@ -2285,7 +2294,9 @@ function renderNode(node, refs) {
 function renderItem(item, list, refs) {
   const tight = list.tight;
   let inner = '';
-  for (const child of item.children) {
+  for (let ci = 0; ci < item.children.length; ci++) {
+    const child = item.children[ci];
+    const childIsLast = ci === item.children.length - 1;
     if (child.t === 'para') {
       if (child.dead || child.lines.length === 0) continue;
       const html = inlineParse(child.lines.join('\n'), refs, newInlineState());
@@ -2294,7 +2305,7 @@ function renderItem(item, list, refs) {
     } else if (child.t === 'text') {
       inner += child.html;
     } else {
-      inner += renderNode(child, refs);
+      inner += renderNode(child, refs, childIsLast);
     }
   }
   // task list checkbox: a paragraph starting with [ ] / [x] / [X]
@@ -2313,7 +2324,7 @@ function renderItem(item, list, refs) {
         // rebuild inner without the first paragraph's checkbox text
         let rebuilt = html;
         for (let k = 1; k < item.children.length; k++) {
-          rebuilt += renderNode(item.children[k], refs);
+          rebuilt += renderNode(item.children[k], refs, k === item.children.length - 1);
         }
         return '<li>' + box + ' ' + rebuilt + '</li>\n';
       }
@@ -2527,7 +2538,15 @@ function inlineParse(src, refs, state) {
         continue;
       }
       const br = matchBr(src, i);
-      if (br) { out.push('<br>'); i += br.len; continue; }
+      if (br) {
+        out.push('<br>');
+        i += br.len;
+        // after a hard break, the next line's leading spaces are stripped
+        while (i < n && (src[i] === ' ' || src[i] === '\t')) i++;
+        prevChar = '';
+        prevIsText = false;
+        continue;
+      }
     }
     // 2. html tag
     if (ch === '<') {
