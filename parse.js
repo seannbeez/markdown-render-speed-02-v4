@@ -1963,10 +1963,11 @@ function parseBlocks(src) {
           if (curRest(cur) === '') break;
           // a fenced code block's content lines stay inside the fence
           // even when they are indented less than the item (the fence
-          // protects them); let the tip handling add the line (or close
-          // the fence) instead of closing the item
+          // protects them) -- but only once the block already has a
+          // content line; if the FIRST content line does not match the
+          // item, the fence closes empty and the line is a paragraph
           const tp0 = tip();
-          if (tp0 && tp0.t === 'code' && tp0.fenced) break;
+          if (tp0 && tp0.t === 'code' && tp0.fenced && tp0.lines.length > 0) break;
           // a line starting a new item in the SAME list is not a lazy
           // continuation, even when the ordered number is not 1
           const lmSame = peekListMarker(cur);
@@ -2003,6 +2004,7 @@ function parseBlocks(src) {
           // the last blank line before a closing fence is not code
           // content (it is the fence's preceding newline)
           if (tp.lines.length > 0 && tp.lines[tp.lines.length - 1] === '') tp.lines.pop();
+          tp.closed = true;
           closeFrom(stack.length - 1);
           i++;
           continue;
@@ -2344,7 +2346,9 @@ function renderNode(node, refs, isLast) {
       return '<hr>\n';
     case 'code': {
       let text = node.lines.join('\n');
-      if (text.length > 0) text += '\n';
+      // each content line ends with a newline; an empty block (no lines
+      // at all) has no trailing newline
+      if (node.lines.length > 0) text += '\n';
       const langAttr = node.lang ? ' class="language-' + escapeNoEncode(node.lang) + '"' : '';
       return '<pre><code' + langAttr + '>' + escapeEncode(text) + '</code></pre>\n';
     }
