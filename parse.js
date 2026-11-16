@@ -2590,7 +2590,14 @@ function matchEmailStart(src, i) {
   while (k < n) {
     const ch = src[k];
     if ((ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || (ch >= '0' && ch <= '9') || ch === '-' || ch === '_') { k++; continue; }
-    if (ch === '.') { labels++; lastDot = k; k++; continue; }
+    // a '.' only separates labels when followed by a domain char;
+    // a trailing '.' (sentence period) ends the domain
+    if (ch === '.' && k + 1 < n) {
+      const nx = src[k + 1];
+      if ((nx >= 'a' && nx <= 'z') || (nx >= 'A' && nx <= 'Z') || (nx >= '0' && nx <= '9') || nx === '-' || nx === '_') {
+        labels++; lastDot = k; k++; continue;
+      }
+    }
     break;
   }
   if (labels < 1) return false;
@@ -2652,7 +2659,8 @@ function inlineParse(src, refs, state) {
         const href = cleanUrl(al.href);
         if (href === null) { out.push(escapeEncode(al.text)); i += al.raw.length; continue; }
         out.push('<a href="' + escapeEncode(href) + '">' + escapeEncode(al.text) + '</a>');
-        state.linkEmitted = true;
+        // an autolink inside a link label does NOT reject the outer
+        // link (linkInText rule), so it does not set linkEmitted
         i += al.raw.length;
         continue;
       }
@@ -2752,7 +2760,7 @@ function inlineParse(src, refs, state) {
           continue;
         }
         out.push('<a href="' + escapeEncode(href) + '">' + escapeEncode(u.text) + '</a>');
-        state.linkEmitted = true;
+        // a bare URL inside a link label does NOT reject the outer link
         i += u.raw.length;
         continue;
       }
