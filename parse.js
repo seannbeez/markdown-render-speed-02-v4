@@ -654,10 +654,76 @@ function tagExtendsPastLabel(src, labelStart, label) {
 
 // Match an inline html tag at the start of `s`. Returns the matched text or null.
 function matchInlineTag(s) {
-  // after the tag name there must be whitespace, '>' or '/' (so
-  // <https://...> is an autolink, not a tag)
-  const m = /^(?:<!--[\s\S]*?-->|<\?[\s\S]*?\?>|<![A-Za-z][^>]*>|<!\[CDATA\[[\s\S]*?\]\]>|<\/?[A-Za-z][A-Za-z0-9-]*(?:\s[^<>]*)?\/?>)/.exec(s);
-  return m ? m[0] : null;
+  // comments, processing instructions, declarations, CDATA
+  let m = /^(?:<!--(?:>|->|-->|[\s\S]*?-->)|<\?[\s\S]*?\?>|<![A-Za-z][^>]*>|<!\[CDATA\[[\s\S]*?\]\]>)/.exec(s);
+  if (m) return m[0];
+  // open/close tag, parsed strictly per CommonMark:
+  //   <name (ws attr)* ws? /? >   (close: </name ws? > -- no attributes)
+  if (s[0] !== '<') return null;
+  let i = 1;
+  let closing = false;
+  if (s[i] === '/') { closing = true; i++; }
+  if (i >= s.length || !isAsciiLetter(s[i])) return null;
+  while (i < s.length && (isAsciiLetter(s[i]) || isDigit(s[i]) || s[i] === '-')) i++;
+  // after the tag name there must be whitespace, '>' or '/'
+  if (closing) {
+    // closing tag: only optional whitespace, then '>'
+    while (i < s.length && (s[i] === ' ' || s[i] === '\t' || s[i] === '\n' || s[i] === '\r')) i++;
+    if (i < s.length && s[i] === '>') return s.slice(0, i + 1);
+    return null;
+  }
+  // open tag: attributes
+  for (;;) {
+    // skip whitespace (incl. newlines)
+    let j = i;
+    while (j < s.length && (s[j] === ' ' || s[j] === '\t' || s[j] === '\n' || s[j] === '\r')) j++;
+    if (j >= s.length) return null;
+    if (s[j] === '>') return s.slice(0, j + 1);
+    if (s[j] === '/') {
+      if (j + 1 < s.length && s[j + 1] === '>') return s.slice(0, j + 2);
+      return null;
+    }
+    // an attribute must be preceded by whitespace
+    if (j === i) return null;
+    i = j;
+    // attribute name: [A-Za-z_:][A-Za-z0-9_.:-]*
+    if (!(isAsciiLetter(s[i]) || s[i] === '_' || s[i] === ':')) return null;
+    i++;
+    while (i < s.length && (isAsciiLetter(s[i]) || isDigit(s[i]) || s[i] === '_' || s[i] === ':' || s[i] === '.' || s[i] === '-')) i++;
+    // optional whitespace, optional = value
+    let k = i;
+    while (k < s.length && (s[k] === ' ' || s[k] === '\t' || s[k] === '\n' || s[k] === '\r')) k++;
+    if (k < s.length && s[k] === '=') {
+      k++;
+      while (k < s.length && (s[k] === ' ' || s[k] === '\t' || s[k] === '\n' || s[k] === '\r')) k++;
+      if (k >= s.length) return null;
+      if (s[k] === '"' || s[k] === "'") {
+        const q = s[k];
+        k++;
+        while (k < s.length && s[k] !== q) k++;
+        if (k >= s.length) return null; // unclosed quote
+        k++;
+      } else {
+        // unquoted value: no whitespace, ", ', =, <, >, `
+        if (s[k] === '"' || s[k] === "'" || s[k] === '=' || s[k] === '<' || s[k] === '>' || s[k] === '`') return null;
+        while (k < s.length && !isSpace(s[k]) && s[k] !== '"' && s[k] !== "'" && s[k] !== '=' && s[k] !== '<' && s[k] !== '>' && s[k] !== '`') k++;
+        if (k === i) return null;
+      }
+      i = k;
+    }
+    // no '=': valueless attribute; i stays at the end of the name so the
+    // next iteration's whitespace skip still sees the separating space
+  }
+}
+
+function isAsciiLetter(ch) {
+  const c = ch.charCodeAt(0);
+  return (c >= 65 && c <= 90) || (c >= 97 && c <= 122);
+}
+
+function isDigit(ch) {
+  const c = ch.charCodeAt(0);
+  return c >= 48 && c <= 57;
 }
 
 // Match an autolink <scheme:...> or <email> at the start of `s`.
@@ -1272,11 +1338,10 @@ function detectHtmlBlock(cur) {
   // type 6: block-level tag
   const m6 = /^<\/?([A-Za-z][A-Za-z0-9-]*)[\s>\/]/.exec(s) || /^<\/?([A-Za-z][A-Za-z0-9-]*)$/.exec(s);
   if (m6 && BLOCK_TAGS.has(m6[1].toLowerCase())) return { type: 6 };
-  // type 7: a complete open or close tag alone on the line. After the tag
-  // name there must be whitespace, '>' or '/' (so <https://...> is NOT a
-  // tag — it is an autolink).
-  const m7 = /^<\/?[A-Za-z][A-Za-z0-9-]*(?:[ \t][^<>]*)?\/?>[ \t]*$/.exec(s);
-  if (m7) return { type: 7 };
+  // type 7: a complete open or close tag alone on the line (validated by
+  // the same strict tag parser as inline tags).
+  const tag7 = matchInlineTag(s);
+  if (tag7 !== null && /^[ \t]*$/.test(s.slice(tag7.length))) return { type: 7 };
   return null;
 }
 
