@@ -1940,6 +1940,11 @@ function parseBlocks(src) {
           // restore the cursor: a failed advance may have consumed
           // leading whitespace, which belongs to the line's content
           cur.pos = saveCur.pos; cur.col = saveCur.col; cur.partial = saveCur.partial;
+          // a line whose content after the matched containers is empty
+          // is an effective blank (e.g. a lone '>' in a blockquote):
+          // do not close the item, let the tip handling end the
+          // paragraph and mark the blank
+          if (curRest(cur) === '') break;
           // a fenced code block's content lines stay inside the fence
           // even when they are indented less than the item (the fence
           // protects them); let the tip handling add the line (or close
