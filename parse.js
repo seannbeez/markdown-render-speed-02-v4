@@ -431,7 +431,9 @@ function maskPunctOutsideCode(src) {
         i = cs.end;
         continue;
       }
-      i++;
+      // a backtick run that cannot form a code span is literal for the
+      // WHOLE run: skip it entirely, do not retry from inside it
+      i += backtickRun(src, i);
       continue;
     }
     i++;
@@ -472,7 +474,9 @@ function maskBlockSkip(src) {
         i = cs.end;
         continue;
       }
-      i++;
+      // a backtick run that cannot form a code span is literal for the
+      // WHOLE run: skip it entirely, do not retry from inside it
+      i += backtickRun(src, i);
       continue;
     }
     if (ch === '<') {
