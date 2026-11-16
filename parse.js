@@ -2322,8 +2322,9 @@ function startsBlockInterruptingPara(cur, inItem) {
 function renderNode(node, refs, isLast) {
   switch (node.t) {
     case 'doc':
-      // at the doc level the last child still needs its trailing newline
-      return node.children.map(c => renderNode(c, refs, false)).join('');
+      // at the doc level the last child still needs its trailing newline,
+      // unless the source does not end with one (then no newline is added)
+      return node.children.map((c, idx) => renderNode(c, refs, idx === node.children.length - 1 && !node.endsWithNewline)).join('');
     case 'bq':
       return '<blockquote>\n' + node.children.map((c, idx) => renderNode(c, refs, idx === node.children.length - 1)).join('') + '</blockquote>\n';
     case 'list': {
@@ -2439,6 +2440,9 @@ export function parse(markdown) {
   const src = String(markdown).replace(/\r\n?/g, '\n');
   if (src === '') return '';
   const { root, refs } = parseBlocks(src);
+  // an HTML block that is the last child of the doc gets no trailing
+  // newline when the source itself does not end with one
+  root.endsWithNewline = src.endsWith('\n');
   return renderNode(root, refs);
 }
 
