@@ -2473,6 +2473,35 @@ export function parse(markdown) {
 
 
 // Try an inline link/image at src[pos] ('[' or '![').
+// Does a link label contain a backtick run that cannot form a code
+// span? marked's label regex pairs backtick runs in order (a code span
+// there is `+ [^`]*? `+ -- the two runs need NOT be the same length),
+// and a run of 2+ backticks immediately before the closing ] is also
+// allowed. An odd leftover run (other than a trailing 2+ run) makes
+// the label invalid, so the inline link / full reflink / image is
+// rejected. A shortcut reflink is exempt: the label is the ref key.
+function hasUnmatchedBacktick(label) {
+  const n = label.length;
+  // collect maximal backtick runs (an escaped \` is not a run)
+  const runs = [];
+  let i = 0;
+  while (i < n) {
+    if (label[i] === '\\' && i + 1 < n) { i += 2; continue; }
+    if (label[i] !== '`') { i++; continue; }
+    let j = i;
+    while (j < n && label[j] === '`') j++;
+    runs.push({ start: i, len: j - i });
+    i = j;
+  }
+  // pair runs in order; a leftover run is unmatched unless it is 2+
+  // backticks at the very end of the label (``+(?=]) in marked)
+  if (runs.length % 2 === 1) {
+    const last = runs[runs.length - 1];
+    if (!(last.len >= 2 && last.start + last.len === n)) return true;
+  }
+  return false;
+}
+
 // Returns {end, text} (text = plain-text label for text mode) or null.
 // When `textMode` is false, returns {end, html}.
 function tryLink(src, pos, refs, state, textMode) {
@@ -2489,6 +2518,7 @@ function tryLink(src, pos, refs, state, textMode) {
   const par = parseLinkParens(src, labelEnd + 1);
   if (!par) return null;
   const labelText = src.slice(bracketPos + 1, labelEnd);
+  if (hasUnmatchedBacktick(labelText)) return null;
   // Be(): tag/autolink extending past the label?
   if (tagExtendsPastLabel(src, bracketPos + 1, labelText)) return null;
   const href = unescapePunct(par.dest);
@@ -2520,6 +2550,9 @@ function tryReflink(src, pos, refs, state, textMode) {
   let key = null;
   let end = -1;
   if (labelEnd + 1 < src.length && src[labelEnd + 1] === '[') {
+    // full ref [label][ref] or collapsed [label][] -- an unmatched
+    // backtick in the label rejects the ref (shortcut below is exempt)
+    if (hasUnmatchedBacktick(labelText)) return { end: pos + 1, text: firstChar, failed: true };
     // full ref [label][ref] or collapsed [label][]
     let k = labelEnd + 2;
     while (k < src.length && src[k] !== ']' && src[k] !== '\n') k++;
