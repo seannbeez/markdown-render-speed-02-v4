@@ -1836,6 +1836,20 @@ function parseBlocks(src) {
     // whichever item receives it makes that item loose if the item
     // already has children (the blank may separate blocks in an outer
     // item, e.g. * foo / * bar / blank / baz -> outer list loose).
+    // BUT: a blank inside a nested blockquote (still open on the stack
+    // above the item) belongs to the blockquote, not the item -- it must
+    // not make the list loose (e.g. * a / > b / > / * c stays tight).
+    let itemIdx = -1;
+    for (let k = stack.length - 1; k >= 0; k--) {
+      if (stack[k].t === 'item') { itemIdx = k; break; }
+    }
+    if (itemIdx >= 0) {
+      let nested = false;
+      for (let k = itemIdx + 1; k < stack.length; k++) {
+        if (stack[k].t === 'bq') { nested = true; break; }
+      }
+      if (nested) return;
+    }
     blankPending = true;
     for (let k = stack.length - 1; k >= 0; k--) {
       const nd = stack[k];
