@@ -1914,7 +1914,7 @@ function parseBlocks(src) {
         if (!matchBQ(cur)) {
           // a line whose content after the matched containers is empty
           // is a blank line (ends the paragraph), not a lazy continuation
-          if (tipIsPara() && !blank && curRest(cur) !== '' && !startsBlockInterruptingPara(cur)) lazy = true;
+          if (tipIsPara() && !blank && curRest(cur) !== '' && !startsBlockInterruptingPara(cur, stack.some(nd => nd.t === 'item'))) lazy = true;
           else closeFrom(depth);
           break;
         }
@@ -1934,6 +1934,12 @@ function parseBlocks(src) {
           // restore the cursor: a failed advance may have consumed
           // leading whitespace, which belongs to the line's content
           cur.pos = saveCur.pos; cur.col = saveCur.col; cur.partial = saveCur.partial;
+          // a fenced code block's content lines stay inside the fence
+          // even when they are indented less than the item (the fence
+          // protects them); let the tip handling add the line (or close
+          // the fence) instead of closing the item
+          const tp0 = tip();
+          if (tp0 && tp0.t === 'code' && tp0.fenced) break;
           // a line starting a new item in the SAME list is not a lazy
           // continuation, even when the ordered number is not 1
           const lmSame = peekListMarker(cur);
@@ -1948,7 +1954,7 @@ function parseBlocks(src) {
             closeFrom(depth - 1);
             break;
           }
-          if (tipIsPara() && !blank && curRest(cur) !== '' && !startsBlockInterruptingPara(cur)) lazy = true;
+          if (tipIsPara() && !blank && curRest(cur) !== '' && !startsBlockInterruptingPara(cur, stack.some(nd => nd.t === 'item'))) lazy = true;
           else closeFrom(depth);
           break;
         }
@@ -2069,7 +2075,7 @@ function parseBlocks(src) {
           i = parseTable(i, cur, tbl);
           continue;
         }
-        if (startsBlockInterruptingPara(cur)) {
+        if (startsBlockInterruptingPara(cur, stack.some(nd => nd.t === 'item'))) {
           closeFrom(stack.length - 1);
           // fall through to open a new block
         } else {
@@ -2124,10 +2130,14 @@ function parseBlocks(src) {
       const lm = peekListMarker(cur);
       if (lm) {
         // can a list interrupt a paragraph? (only bullet, or ordered start 1;
-        // an empty item cannot interrupt a paragraph)
+        // an empty item cannot interrupt a paragraph). Exception: a list
+        // marker at a list item's content indent starts a NESTED list even
+        // when the paragraph inside the item is still open and the ordered
+        // number is not 1 (e.g. - a / 49. b -> nested <ol start="49">).
         const tp2 = tip();
         if (tp2.t === 'para') {
-          if (lm.empty || !(lm.ordered === false || lm.start === 1)) {
+          const inItem = stack.some(nd => nd.t === 'item');
+          if (!inItem && (lm.empty || !(lm.ordered === false || lm.start === 1))) {
             // cannot interrupt: treat as paragraph text
             break;
           }
@@ -2259,7 +2269,7 @@ function sameListType(list, lm) {
 }
 
 // Can this line start a block that interrupts a paragraph?
-function startsBlockInterruptingPara(cur) {
+function startsBlockInterruptingPara(cur, inItem) {
   if (detectFence(cur)) return true;
   if (detectATX(cur)) return true;
   if (detectHr(cur)) return true;
@@ -2269,7 +2279,9 @@ function startsBlockInterruptingPara(cur) {
   const save = { pos: cur.pos, col: cur.col, partial: cur.partial };
   if (matchBQ(cur)) { cur.pos = save.pos; cur.col = save.col; cur.partial = save.partial; return true; }
   const lm = peekListMarker(cur);
-  if (lm && !lm.empty && (!lm.ordered || lm.start === 1)) return true;
+  // a list marker inside a list item starts a nested list even for an
+  // ordered number other than 1 (the paragraph in the item ends)
+  if (lm && !lm.empty && (!lm.ordered || lm.start === 1 || inItem)) return true;
   return false;
 }
 
@@ -2345,41 +2357,44 @@ function renderNode(node, refs, isLast) {
 
 function renderItem(item, list, refs) {
   const tight = list.tight;
+  // task list checkbox: a paragraph starting with [ ] / [x] / [X]
+  let box = null;
+  let firstParaRest = null;
+  if (item.children.length > 0) {
+    const first = item.children[0];
+    if (first.t === 'para' && !first.dead && first.lines.length > 0) {
+      const m = /^\[([ xX])\][ \t]+/.exec(first.lines[0]);
+      if (m) {
+        const checked = m[1] !== ' ';
+        box = checked
+          ? '<input checked="" disabled="" type="checkbox">'
+          : '<input disabled="" type="checkbox">';
+        const rest = first.lines[0].slice(m[0].length);
+        firstParaRest = [rest].concat(first.lines.slice(1));
+      }
+    }
+  }
   let inner = '';
   for (let ci = 0; ci < item.children.length; ci++) {
     const child = item.children[ci];
     const childIsLast = ci === item.children.length - 1;
     if (child.t === 'para') {
       if (child.dead || child.lines.length === 0) continue;
-      const html = inlineParse(child.lines.join('\n'), refs, newInlineState());
-      if (tight) inner += html;
-      else inner += '<p>' + html + '</p>\n';
+      const lines = (ci === 0 && firstParaRest) ? firstParaRest : child.lines;
+      const html = inlineParse(lines.join('\n'), refs, newInlineState());
+      if (ci === 0 && box) {
+        // the checkbox opens the paragraph (loose: inside <p>)
+        if (tight) inner += box + ' ' + html;
+        else inner += '<p>' + box + ' ' + html + '</p>\n';
+      } else if (tight) {
+        inner += html;
+      } else {
+        inner += '<p>' + html + '</p>\n';
+      }
     } else if (child.t === 'text') {
       inner += child.html;
     } else {
       inner += renderNode(child, refs, childIsLast);
-    }
-  }
-  // task list checkbox: a paragraph starting with [ ] / [x] / [X]
-  if (tight && item.children.length > 0) {
-    const first = item.children[0];
-    if (first.t === 'para' && !first.dead && first.lines.length > 0) {
-      const m = /^\[([ xX])\][ \t]+/.exec(first.lines[0]);
-      if (m) {
-        const checked = m[1] !== ' ';
-        const box = checked
-          ? '<input checked="" disabled="" type="checkbox">'
-          : '<input disabled="" type="checkbox">';
-        const rest = first.lines[0].slice(m[0].length);
-        const newLines = [rest].concat(first.lines.slice(1));
-        const html = inlineParse(newLines.join('\n'), refs, newInlineState());
-        // rebuild inner without the first paragraph's checkbox text
-        let rebuilt = html;
-        for (let k = 1; k < item.children.length; k++) {
-          rebuilt += renderNode(item.children[k], refs, k === item.children.length - 1);
-        }
-        return '<li>' + box + ' ' + rebuilt + '</li>\n';
-      }
     }
   }
   if (inner === '') return '<li></li>\n';
