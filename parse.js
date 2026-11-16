@@ -537,7 +537,6 @@ function parseTitle(src, j) {
     const ch = src[k];
     if (ch === '\\' && k + 1 < n) { title += src[k] + src[k + 1]; k += 2; continue; }
     if (ch === close) return { title: unescapePunct(title), end: k + 1 };
-    if (q !== '(' && ch === '\n') return null;
     title += ch;
     k++;
   }
@@ -1567,15 +1566,20 @@ function startsBlock(cur) {
 // `lines` are the paragraph's raw lines. Returns {def, consumed} or null.
 // def = {href, title}; consumed = number of lines used.
 function parseDef(lines, li) {
-  const first = lines[li];
-  // label: up to 3 spaces, [label]:
-  let m = /^ {0,3}\[((?:\\[\s\S]|[^\\\[\]])*)\]:/.exec(first);
+  // the label may span lines: apply the regex to the lines joined by \n
+  const joined = lines.slice(li).join('\n');
+  let m = /^ {0,3}\[((?:\\[\s\S]|[^\\\[\]])*)\]:/.exec(joined);
   if (!m) return null;
   const labelRaw = m[1];
   // an empty (or whitespace-only) label is not a valid definition
   if (normalizeLabel(unescapePunct(labelRaw)) === '') return null;
-  let rest = first.slice(m[0].length);
-  let li2 = li;
+  // which line does the label end on, and at what column (after the ':')?
+  const matched = m[0];
+  const lastNL = matched.lastIndexOf('\n');
+  const labelLines = lastNL < 0 ? 0 : matched.slice(0, lastNL + 1).split('\n').length - 1;
+  let li2 = li + labelLines;
+  const colAfter = lastNL < 0 ? matched.length : matched.length - lastNL - 1;
+  let rest = lines[li2].slice(colAfter);
   // dest: optional whitespace/newline, then <...> or bare
   let dest = null;
   let title = '';
@@ -1653,19 +1657,35 @@ function parseDef(lines, li) {
   }
   if (q < after.length && (after[q] === '"' || after[q] === "'" || after[q] === '(')) {
     if (!wsBefore) return null; // no whitespace between dest and title
-    const t = parseTitle(after, q);
-    const tailOk = t && after.slice(t.end).replace(/[ \t]/g, '') === '';
-    if (!tailOk) {
-      // malformed title or trailing junk: if the title is on a later line
-      // than the dest, fall back to a no-title def; if it is on the dest
-      // line itself, the def is invalid
+    // the title may span lines: parse it on `after` plus the following
+    // lines joined by \n (q is an index into `after`, hence into this)
+    const joinedTitle = after + (li3 + 1 < lines.length ? '\n' + lines.slice(li3 + 1).join('\n') : '');
+    const t = parseTitle(joinedTitle, q);
+    if (!t) {
       if (li3 > li2) {
         return { def: { href: unescapePunct(dest), title: '' }, consumed: li2 - li + 1, label: normalizeLabel(unescapePunct(labelRaw)) };
       }
       return null;
     }
+    // which line does the title end on, and is the tail only whitespace?
+    const titleText = joinedTitle.slice(0, t.end);
+    const titleLines = titleText.split('\n').length - 1;
+    const li3End = li3 + titleLines;
+    const afterOffset = lines[li3].length - after.length;
+    const lastNL = titleText.lastIndexOf('\n');
+    const tailStart = lastNL < 0 ? afterOffset + t.end : t.end - lastNL - 1;
+    const tailOk = lines[li3End].slice(tailStart).replace(/[ \t]/g, '') === '';
+    if (!tailOk) {
+      // malformed title or trailing junk: if the title is on a later line
+      // than the dest, fall back to a no-title def; if it is on the dest
+      // line itself, the def is invalid
+      if (li3End > li2) {
+        return { def: { href: unescapePunct(dest), title: '' }, consumed: li2 - li + 1, label: normalizeLabel(unescapePunct(labelRaw)) };
+      }
+      return null;
+    }
     title = t.title;
-    return { def: { href: unescapePunct(dest), title }, consumed: li3 - li + 1, label: normalizeLabel(unescapePunct(labelRaw)) };
+    return { def: { href: unescapePunct(dest), title }, consumed: li3End - li + 1, label: normalizeLabel(unescapePunct(labelRaw)) };
   }
   // junk on the dest line itself invalidates the def; a following line that
   // is not a title does not (the def simply has no title)
