@@ -1363,12 +1363,14 @@ function detectHtmlBlock(cur) {
   if (i >= rest.length || rest[i] !== '<') return null;
   const s = rest.slice(i);
   const lower = s.toLowerCase();
-  // type 1: pre, script, style, textarea
-  const m1 = /^<\/?(pre|script|style|textarea)(?=[\s>\/]|$)/.exec(lower);
+  // type 1: pre, script, style, textarea -- OPENING tag only; a closing
+  // </pre> etc. is not an html block start (marked's regex only has
+  // <(?:script|pre|style|textarea) for these, while closing block tags
+  // like </table> are matched by the type-6 alternative)
+  const m1 = /^<(pre|script|style|textarea)(?=[\s>\/]|$)/.exec(lower);
   if (m1) {
     const tag = m1[1];
-    const isClose = s[1] === '/';
-    return { type: 1, closeTag: tag, isClose };
+    return { type: 1, closeTag: tag, isClose: false };
   }
   // type 2: comment
   if (lower.startsWith('<!--')) return { type: 2, endMarker: '-->' };
@@ -2131,6 +2133,13 @@ function parseBlocks(src) {
           text = dedentStr(text, itemIndent, cur.col);
         } else if (curIndentCols(cur) >= 4) {
           text = dedentStr(text, 4, cur.col);
+        }
+        // a lazy '===' line inside a blockquote is not a setext
+        // underline; marked keeps it as paragraph text indented by 4
+        // spaces -- but only when the paragraph already has a lazy
+        // line before it (a '---' line is kept as-is)
+        if (/^=+[ \t]*$/.test(text) && tp.lines.length >= 2 && stack.some(nd => nd.t === 'bq')) {
+          text = '    ' + text;
         }
         tp.lines.push(text);
         i++;
