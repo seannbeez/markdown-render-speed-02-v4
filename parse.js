@@ -2627,7 +2627,15 @@ function inlineParse(src, refs, state) {
     // 6. br (2+ spaces + newline)
     if (ch === ' ') {
       const br = matchBr(src, i);
-      if (br) { out.push('<br>'); i += br.len; continue; }
+      if (br) {
+        out.push('<br>');
+        i += br.len;
+        // after a hard break, the next line's leading spaces are stripped
+        while (i < n && (src[i] === ' ' || src[i] === '\t')) i++;
+        prevChar = '';
+        prevIsText = false;
+        continue;
+      }
     }
     // 7. del
     if (ch === '~') {
