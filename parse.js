@@ -1760,9 +1760,11 @@ function dedentStr(s, cols, startCol) {
     }
     break;
   }
-  // a leading tab at a non-tab-stop column (e.g. after a container prefix
-  // consumed 6 columns) expands to spaces to the next tab stop
-  if (i < s.length && s[i] === '\t' && col % 4 !== 0) {
+  // a tab after a container prefix expands to spaces to the next tab
+  // stop (using its absolute column): e.g. after '> ' the tab at col 3
+  // becomes 1 space, at col 4 becomes 4 spaces. With no container
+  // prefix (startCol 0) a tab is intact and stays a tab.
+  if (startCol > 0 && i < s.length && s[i] === '\t') {
     const w = 4 - (col % 4);
     return ' '.repeat(w) + s.slice(i + 1);
   }
