@@ -1979,6 +1979,9 @@ function parseBlocks(src) {
       const tp = tip();
       if (tp.t === 'code' && tp.fenced) {
         if (isClosingFence(cur, tp)) {
+          // the last blank line before a closing fence is not code
+          // content (it is the fence's preceding newline)
+          if (tp.lines.length > 0 && tp.lines[tp.lines.length - 1] === '') tp.lines.pop();
           closeFrom(stack.length - 1);
           i++;
           continue;
