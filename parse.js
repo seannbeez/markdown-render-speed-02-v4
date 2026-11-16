@@ -1822,10 +1822,15 @@ function parseBlocks(src) {
     for (let k = stack.length - 1; k >= idx; k--) finalize(stack[k]);
     stack.length = idx;
   }
+  let blankPending = false;
   function markBlank() {
     // a blank line marks only the innermost item and its list as having
     // seen a blank (a blank inside a nested list must not make the outer
-    // list loose)
+    // list loose). It also sets blankPending: the NEXT block added to
+    // whichever item receives it makes that item loose if the item
+    // already has children (the blank may separate blocks in an outer
+    // item, e.g. * foo / * bar / blank / baz -> outer list loose).
+    blankPending = true;
     for (let k = stack.length - 1; k >= 0; k--) {
       const nd = stack[k];
       if (nd.t === 'item') {
@@ -1844,8 +1849,9 @@ function parseBlocks(src) {
     for (let k = stack.length - 1; k >= 0; k--) {
       const nd = stack[k];
       if (nd.t === 'item') {
-        if (nd.sawBlank && nd.children.length > 0) nd.loose = true;
+        if ((nd.sawBlank || blankPending) && nd.children.length > 0) nd.loose = true;
         nd.sawBlank = false;
+        blankPending = false;
         break;
       }
     }
@@ -2131,9 +2137,15 @@ function parseBlocks(src) {
         if (tp2.t === 'list' && sameListType(tp2, lm)) {
           list = tp2;
           if (list.sawBlank) list.loose = true;
+          // a blank pending from before this new item (e.g. between the
+          // outer items, after a nested list ended) makes the list loose
+          if (blankPending) list.loose = true;
           list.sawBlank = false;
         } else {
           if (tp2.t === 'list') closeFrom(stack.length - 1);
+          // a brand-new list after a blank is tight; the blank was
+          // before the list, not inside it
+          blankPending = false;
           list = { t: 'list', ordered: lm.ordered, delim: lm.delim, bullet: lm.bullet, start: lm.start, items: [], loose: false, sawBlank: false };
           addChild(list);
           noteBlockAdded();
